@@ -122,3 +122,6 @@ class Choice(models.Model):
 class Submission(models.Model):
     enrollment = models.ForeignKey(Enrollment, on_delete=models.CASCADE)
     choices = models.ManyToManyField(Choice, blank=True)
+
+    def __str__(self):
+        return f'Submission {self.pk} for enrollment {self.enrollment_id}'
