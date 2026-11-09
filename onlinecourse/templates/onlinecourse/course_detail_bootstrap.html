@@ -50,7 +50,37 @@
                     </div>
                 {% endfor %}
             </div>
-            <!-- Course detail template changes go here -->
+            {% if user.is_authenticated %}
+              {% if is_enrolled %}
+                <button class="btn btn-primary my-3" type="button" data-toggle="collapse"
+                        data-target="#exam" aria-expanded="false" aria-controls="exam">Start Exam</button>
+                <div class="collapse" id="exam">
+                  <form action="{% url 'onlinecourse:submit' course.id %}" method="post">
+                    {% csrf_token %}
+                    <p>Select all correct answers for each question.</p>
+                    {% for question in course.question_set.all %}
+                    <fieldset class="card mb-3">
+                      <legend class="card-header h5">{{ forloop.counter }}. {{ question.question_text }} ({{ question.grade }} points)</legend>
+                      <div class="card-body">
+                      {% for choice in question.choice_set.all %}
+                        <div class="form-check">
+                          <input class="form-check-input" type="checkbox" name="choice_{{ question.id }}"
+                                 id="choice_{{ choice.id }}" value="{{ choice.id }}">
+                          <label class="form-check-label" for="choice_{{ choice.id }}">{{ choice.choice_text }}</label>
+                        </div>
+                      {% endfor %}
+                      </div>
+                    </fieldset>
+                    {% empty %}<p>No exam questions are available yet.</p>{% endfor %}
+                    {% if course.question_set.exists %}<button class="btn btn-success mb-4" type="submit">Submit Exam</button>{% endif %}
+                  </form>
+                </div>
+              {% else %}
+                <a class="btn btn-primary my-3" href="{% url 'onlinecourse:enroll' course.id %}">Enroll to take the exam</a>
+              {% endif %}
+            {% else %}
+              <p class="my-3"><a href="{% url 'onlinecourse:login' %}">Log in</a> to enroll and take the exam.</p>
+            {% endif %}
     </div>
 </body>
 </html>

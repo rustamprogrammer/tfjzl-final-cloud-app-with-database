@@ -1,7 +1,10 @@
 from django.shortcuts import render
-from django.http import HttpResponseRedirect
+from django.http import HttpResponseRedirect, HttpResponseBadRequest
 # <HINT> Import any new Models here
-from .models import Course, Enrollment
+from .models import Course, Enrollment, Question, Choice, Submission
+from django.contrib.auth.decorators import login_required
+from django.db import transaction
+from django.views.decorators.http import require_POST
 from django.contrib.auth.models import User
 from django.shortcuts import get_object_or_404, render, redirect
 from django.urls import reverse
@@ -88,6 +91,11 @@ class CourseDetailView(generic.DetailView):
     model = Course
     template_name = 'onlinecourse/course_detail_bootstrap.html'
 
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context['is_enrolled'] = check_if_enrolled(self.request.user, self.object)
+        return context
+
 
 def enroll(request, course_id):
     course = get_object_or_404(Course, pk=course_id)
@@ -110,18 +118,29 @@ def enroll(request, course_id):
          # Collect the selected choices from exam form
          # Add each selected choice object to the submission object
          # Redirect to show_exam_result with the submission id
-#def submit(request, course_id):
+@login_required(login_url='onlinecourse:login')
+@require_POST
+def submit(request, course_id):
+    course = get_object_or_404(Course, pk=course_id)
+    enrollment = get_object_or_404(Enrollment, user=request.user, course=course)
+    try:
+        selected_ids = set(extract_answers(request))
+    except (TypeError, ValueError):
+        return HttpResponseBadRequest('Invalid answer.')
+    choices = list(Choice.objects.filter(pk__in=selected_ids, question__course=course))
+    if len(choices) != len(selected_ids):
+        return HttpResponseBadRequest('An answer does not belong to this course.')
+    with transaction.atomic():
+        submission = Submission.objects.create(enrollment=enrollment)
+        submission.choices.set(choices)
+    return redirect('onlinecourse:show_exam_result', course_id=course.pk,
+                    submission_id=submission.pk)
 
 
 # An example method to collect the selected choices from the exam form from the request object
 def extract_answers(request):
-   submitted_anwsers = []
-   for key in request.POST:
-       if key.startswith('choice'):
-           value = request.POST[key]
-           choice_id = int(value)
-           submitted_anwsers.append(choice_id)
-   return submitted_anwsers
+    return [int(value) for key, values in request.POST.lists()
+            if key.startswith('choice') for value in values]
 
 
 # <HINT> Create an exam result view to check if learner passed exam and show their question results and result for each question,
@@ -130,7 +149,27 @@ def extract_answers(request):
         # Get the selected choice ids from the submission record
         # For each selected choice, check if it is a correct answer or not
         # Calculate the total score
-#def show_exam_result(request, course_id, submission_id):
+@login_required(login_url='onlinecourse:login')
+def show_exam_result(request, course_id, submission_id):
+    course = get_object_or_404(Course, pk=course_id)
+    submission = get_object_or_404(
+        Submission, pk=submission_id, enrollment__course=course,
+        enrollment__user=request.user)
+    selected_ids = set(submission.choices.values_list('pk', flat=True))
+    questions = course.question_set.prefetch_related('choice_set').order_by('pk')
+    results = []
+    earned = total = 0
+    for question in questions:
+        correct = question.is_get_score(selected_ids)
+        points = question.grade if correct else 0
+        earned += points
+        total += question.grade
+        results.append({'question': question, 'correct': correct, 'points': points})
+    grade = round(100 * earned / total, 2) if total else 0
+    return render(request, 'onlinecourse/exam_result_bootstrap.html', {
+        'course': course, 'submission': submission, 'selected_ids': selected_ids,
+        'results': results, 'grade': grade, 'earned': earned, 'total': total,
+    })
 
 
 
